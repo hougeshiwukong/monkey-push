@@ -15,8 +15,8 @@ jobs:
         # 获取当前北京时间
         HOUR=$(TZ=Asia/Shanghai date +%H)
         MINUTE=$(TZ=Asia/Shanghai date +%M)
-        CURRENT_TIME="${HOUR}:${MINUTE}"
         DATE=$(TZ=Asia/Shanghai date +%Y-%m-%d)
+        CURRENT_TIME="${HOUR}:${MINUTE}"
         
         echo "当前北京时间: $CURRENT_TIME"
         
@@ -95,18 +95,8 @@ jobs:
           CONTENT="${TITLE}\n\n📊 实时数据\n• 比亚迪：¥${BYD_PRICE} (${BYD_CHANGE}%)\n• 茅台：¥${MT_PRICE} (${MT_CHANGE}%)\n• 宁德时代：¥${CATL_PRICE} (${CATL_CHANGE}%)\n\n💡 即时分析\n• 根据当前走势分析\n• 提供操作建议\n\n🐒 不为失败找借口，只为成功找方法！"
         fi
         
-        # 执行推送（双渠道）
+        # 执行推送到飞书
         if [ "$SHOULD_PUSH" == "true" ]; then
-          echo "推送到微信（PushPlus）..."
-          curl -X POST "http://www.pushplus.plus/send" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"token\": \"${{ secrets.PUSHPLUS_TOKEN }}\",
-              \"title\": \"${TITLE}\",
-              \"content\": \"${CONTENT}\",
-              \"template\": \"txt\"
-            }" 2>/dev/null || echo "微信推送失败"
-          
           echo "推送到飞书..."
           curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
             -H "Content-Type: application/json" \
@@ -115,9 +105,7 @@ jobs:
               \"content\": {
                 \"text\": \"${CONTENT}\"
               }
-            }" 2>/dev/null || echo "飞书推送失败"
-          
-          echo "✅ 双渠道推送完成！"
+            }" 2>/dev/null && echo "✅ 飞书推送成功" || echo "❌ 飞书推送失败"
         else
           echo "⏰ 不在推送时间段，跳过"
         fi
