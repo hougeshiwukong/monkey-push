@@ -1,0 +1,123 @@
+name: 猴股神自动推送
+
+on:
+  schedule:
+    # 每30分钟检查一次
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  smart-push:
+    runs-on: ubuntu-latest
+    steps:
+    - name: 获取实时股票数据并智能推送
+      run: |
+        # 获取当前北京时间
+        HOUR=$(TZ=Asia/Shanghai date +%H)
+        MINUTE=$(TZ=Asia/Shanghai date +%M)
+        CURRENT_TIME="${HOUR}:${MINUTE}"
+        DATE=$(TZ=Asia/Shanghai date +%Y-%m-%d)
+        
+        echo "当前北京时间: $CURRENT_TIME"
+        
+        # 获取股票数据函数
+        get_stock_data() {
+          CODE=$1
+          PREFIX=$2
+          RESPONSE=$(curl -s "https://push2.eastmoney.com/api/qt/stock/get?secid=${PREFIX}.${CODE}&fields=f43,f44,f45,f46,f47,f48,f60,f170,f57,f58" || echo "")
+          if [ -n "$RESPONSE" ]; then
+            PRICE=$(echo $RESPONSE | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['f43']/100 if d.get('data') else 0)")
+            CHANGE=$(echo $RESPONSE | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['f170']/100 if d.get('data') else 0)")
+            CHANGE_PCT=$(echo $RESPONSE | python3 -c "import sys,json; d=json.load(sys.stdin); data=d.get('data',{}); print(round((data.get('f170',0)/data.get('f60',1))*100, 2) if data else 0)")
+            NAME=$(echo $RESPONSE | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['data']['f58'] if d.get('data') else '')")
+            echo "$NAME|$PRICE|$CHANGE|$CHANGE_PCT"
+          fi
+        }
+        
+        # 获取3只股票数据
+        BYD=$(get_stock_data "002594" "0")
+        MT=$(get_stock_data "600519" "1")
+        CATL=$(get_stock_data "300750" "0")
+        
+        echo "比亚迪: $BYD"
+        echo "茅台: $MT"
+        echo "宁德时代: $CATL"
+        
+        # 解析数据
+        BYD_PRICE=$(echo $BYD | cut -d'|' -f2)
+        BYD_CHANGE=$(echo $BYD | cut -d'|' -f4)
+        MT_PRICE=$(echo $MT | cut -d'|' -f2)
+        MT_CHANGE=$(echo $MT | cut -d'|' -f4)
+        CATL_PRICE=$(echo $CATL | cut -d'|' -f2)
+        CATL_CHANGE=$(echo $CATL | cut -d'|' -f4)
+        
+        # 智能推送逻辑
+        SHOULD_PUSH=false
+        
+        # 如果是9:00-9:30，推送开盘推荐
+        if [ "$HOUR" == "09" ] && [ "$MINUTE" -lt "30" ]; then
+          echo "推送开盘前推荐..."
+          SHOULD_PUSH=true
+          
+          # 分析推荐
+          RECOMMENDATION="🎯 今日推荐\n"
+          
+          if (( $(echo "$BYD_CHANGE > 2" | bc -l) )); then
+            RECOMMENDATION="${RECOMMENDATION}• 比亚迪：强势上涨 ${BYD_CHANGE}%，关注突破机会 🚀\n"
+          elif (( $(echo "$BYD_CHANGE < -2" | bc -l) )); then
+            RECOMMENDATION="${RECOMMENDATION}• 比亚迪：回调 ${BYD_CHANGE}%，等待企稳 👀\n"
+          else
+            RECOMMENDATION="${RECOMMENDATION}• 比亚迪：震荡整理，观望 📊\n"
+          fi
+          
+          RECOMMENDATION="${RECOMMENDATION}• 茅台：长期持有，价值投资 💎\n"
+          RECOMMENDATION="${RECOMMENDATION}• 宁德时代：等待明确的买入信号 ⏳\n"
+          
+          TITLE="🐒 猴哥开盘前推荐 - ${DATE}"
+          CONTENT="${TITLE}\n\n📊 大盘研判\n• 市场情绪：根据隔夜美股和早盘走势判断\n• 策略：积极布局，控制仓位\n\n${RECOMMENDATION}\n📈 实时数据\n• 比亚迪：¥${BYD_PRICE} (${BYD_CHANGE}%)\n• 茅台：¥${MT_PRICE} (${MT_CHANGE}%)\n• 宁德时代：¥${CATL_PRICE} (${CATL_CHANGE}%)\n\n⚠️ 风险提示\n• 以上分析基于实时数据，仅供参考\n• 股市有风险，投资需谨慎\n• 请根据自身情况独立判断\n\n🐒 不为失败找借口，只为成功找方法！"
+        fi
+        
+        # 如果是15:30-16:00，推送收盘复盘
+        if [ "$HOUR" == "15" ] && [ "$MINUTE" -ge "30" ]; then
+          echo "推送收盘后复盘..."
+          SHOULD_PUSH=true
+          
+          TITLE="🐒 猴哥收盘复盘 - ${DATE}"
+          CONTENT="${TITLE}\n\n📊 今日战况\n• 比亚迪：¥${BYD_PRICE} (${BYD_CHANGE}%)\n• 茅台：¥${MT_PRICE} (${MT_CHANGE}%)\n• 宁德时代：¥${CATL_PRICE} (${CATL_CHANGE}%)\n\n💡 复盘总结\n• 分析今日涨跌原因\n• 主力资金流向\n• 板块轮动情况\n\n🎯 明日策略\n• 关注今晚美股走势\n• 观察北向资金流向\n• 控制仓位，灵活应对\n\n🐒 不为失败找借口，只为成功找方法！"
+        fi
+        
+        # 如果是手动触发，立即推送
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          echo "手动触发，立即推送..."
+          SHOULD_PUSH=true
+          
+          TITLE="🐒 猴哥即时推送 - ${DATE} ${CURRENT_TIME}"
+          CONTENT="${TITLE}\n\n📊 实时数据\n• 比亚迪：¥${BYD_PRICE} (${BYD_CHANGE}%)\n• 茅台：¥${MT_PRICE} (${MT_CHANGE}%)\n• 宁德时代：¥${CATL_PRICE} (${CATL_CHANGE}%)\n\n💡 即时分析\n• 根据当前走势分析\n• 提供操作建议\n\n🐒 不为失败找借口，只为成功找方法！"
+        fi
+        
+        # 执行推送（双渠道）
+        if [ "$SHOULD_PUSH" == "true" ]; then
+          echo "推送到微信（PushPlus）..."
+          curl -X POST "http://www.pushplus.plus/send" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"token\": \"${{ secrets.PUSHPLUS_TOKEN }}\",
+              \"title\": \"${TITLE}\",
+              \"content\": \"${CONTENT}\",
+              \"template\": \"txt\"
+            }" 2>/dev/null || echo "微信推送失败"
+          
+          echo "推送到飞书..."
+          curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"msg_type\": \"text\",
+              \"content\": {
+                \"text\": \"${CONTENT}\"
+              }
+            }" 2>/dev/null || echo "飞书推送失败"
+          
+          echo "✅ 双渠道推送完成！"
+        else
+          echo "⏰ 不在推送时间段，跳过"
+        fi
