@@ -15,29 +15,41 @@ jobs:
         DATE=$(TZ=Asia/Shanghai date +%Y-%m-%d)
         TIME=$(TZ=Asia/Shanghai date +%H:%M)
         
-        # 获取股票数据（使用腾讯财经API）
-        STOCK_DATA=$(curl -s "http://qt.gtimg.cn/q=sz002594,sh600519,sz300750" 2>/dev/null || echo "")
+        # 使用东方财富API获取数据
+        get_eastmoney_data() {
+          CODE=$1
+          PREFIX=$2
+          RESPONSE=$(curl -s "https://push2.eastmoney.com/api/qt/stock/get?secid=${PREFIX}.${CODE}&fields=f43,f57,f58,f60,f170" 2>/dev/null)
+          echo "$RESPONSE"
+        }
         
-        # 解析数据函数
-        parse_stock() {
-          DATA=$1
-          CODE=$2
-          if echo "$DATA" | grep -q "$CODE"; then
-            LINE=$(echo "$DATA" | grep "$CODE" | head -1)
-            NAME=$(echo "$LINE" | cut -d'~' -f2)
-            PRICE=$(echo "$LINE" | cut -d'~' -f3)
-            CHANGE=$(echo "$LINE" | cut -d'~' -f5)
-            CHANGE_PCT=$(echo "$LINE" | cut -d'~' -f6)
-            echo "${NAME}|${PRICE}|${CHANGE}|${CHANGE_PCT}"
+        # 获取三只股票数据
+        BYD_RAW=$(get_eastmoney_data "002594" "0")
+        MT_RAW=$(get_eastmoney_data "600519" "1")
+        CATL_RAW=$(get_eastmoney_data "300750" "0")
+        
+        # 解析函数
+        parse_data() {
+          RAW=$1
+          PRICE=$(echo "$RAW" | grep -o '"f43":[0-9]*' | cut -d':' -f2)
+          NAME=$(echo "$RAW" | grep -o '"f58":"[^"]*"' | cut -d'"' -f4)
+          PREV=$(echo "$RAW" | grep -o '"f60":[0-9]*' | cut -d':' -f2)
+          CHANGE=$(echo "$RAW" | grep -o '"f170":-[0-9]*\|"f170":[0-9]*' | cut -d':' -f2)
+          
+          # 计算
+          if [ -n "$PRICE" ] && [ -n "$PREV" ] && [ "$PREV" -ne 0 ]; then
+            PRICE_DEC=$(echo "scale=2; $PRICE / 100" | bc)
+            CHANGE_DEC=$(echo "scale=2; $CHANGE / 100" | bc)
+            PCT=$(echo "scale=2; ($CHANGE / $PREV) * 100" | bc)
+            echo "${NAME}|${PRICE_DEC}|${CHANGE_DEC}|${PCT}"
           else
             echo "获取失败|0|0|0"
           fi
         }
         
-        # 获取三只股票数据
-        BYD=$(parse_stock "$STOCK_DATA" "sz002594")
-        MT=$(parse_stock "$STOCK_DATA" "sh600519")
-        CATL=$(parse_stock "$STOCK_DATA" "sz300750")
+        BYD=$(parse_data "$BYD_RAW")
+        MT=$(parse_data "$MT_RAW")
+        CATL=$(parse_data "$CATL_RAW")
         
         # 解析
         BYD_NAME=$(echo "$BYD" | cut -d'|' -f1)
@@ -55,20 +67,24 @@ jobs:
         CATL_CHANGE=$(echo "$CATL" | cut -d'|' -f3)
         CATL_PCT=$(echo "$CATL" | cut -d'|' -f4)
         
-        # 生成分析建议
+        # 生成建议（含止损止盈）
         generate_advice() {
           PCT=$1
           PCT_INT=${PCT%.*}
-          if [ "$PCT_INT" -gt 3 ] 2>/dev/null; then
-            echo "强势上涨，可考虑减仓锁定利润"
-          elif [ "$PCT_INT" -gt 1 ] 2>/dev/null; then
-            echo "温和上涨，持有观望"
-          elif [ "$PCT_INT" -gt -1 ] 2>/dev/null; then
-            echo "震荡整理，等待方向"
-          elif [ "$PCT_INT" -gt -3 ] 2>/dev/null; then
-            echo "回调中，谨慎观望"
+          if [ -z "$PCT_INT" ]; then
+            PCT_INT=0
+          fi
+          
+          if [ "$PCT_INT" -gt 5 ]; then
+            echo "🔴 止盈建议：涨幅超5%，可考虑减仓锁定利润"
+          elif [ "$PCT_INT" -gt 2 ]; then
+            echo "🟡 持有观望：温和上涨，继续观察"
+          elif [ "$PCT_INT" -gt -2 ]; then
+            echo "⚪ 震荡整理：等待明确方向"
+          elif [ "$PCT_INT" -gt -5 ]; then
+            echo "🟠 止损关注：回调中，设好止损位"
           else
-            echo "大幅下跌，关注抄底机会"
+            echo "🔵 抄底机会：跌幅超5%，关注反弹机会"
           fi
         }
         
@@ -76,40 +92,38 @@ jobs:
         MT_ADVICE=$(generate_advice "$MT_PCT")
         CATL_ADVICE=$(generate_advice "$CATL_PCT")
         
-        # 使用简单文本格式避免引号问题
-        echo "🐒 猴哥股票专业报告 📊" > /tmp/content.txt
-        echo "⏰ ${DATE} ${TIME}" >> /tmp/content.txt
-        echo "" >> /tmp/content.txt
-        echo "━━━━━━━━━━━━━━━━━━━━━" >> /tmp/content.txt
-        echo "" >> /tmp/content.txt
-        echo "📈 实时行情" >> /tmp/content.txt
-        echo "" >> /tmp/content.txt
-        echo "🚗 比亚迪 002594" >> /tmp/content.txt
-        echo "💰 现价：¥${BYD_PRICE}" >> /tmp/content.txt
-        echo "📊 涨跌：${BYD_CHANGE} (${BYD_PCT}%)" >> /tmp/content.txt
-        echo "💡 建议：${BYD_ADVICE}" >> /tmp/content.txt
-        echo "" >> /tmp/content.txt
-        echo "🍶 贵州茅台 600519" >> /tmp/content.txt
-        echo "💰 现价：¥${MT_PRICE}" >> /tmp/content.txt
-        echo "📊 涨跌：${MT_CHANGE} (${MT_PCT}%)" >> /tmp/content.txt
-        echo "💡 建议：${MT_ADVICE}" >> /tmp/content.txt
-        echo "" >> /tmp/content.txt
-        echo "🔋 宁德时代 300750" >> /tmp/content.txt
-        echo "💰 现价：¥${CATL_PRICE}" >> /tmp/content.txt
-        echo "📊 涨跌：${CATL_CHANGE} (${CATL_PCT}%)" >> /tmp/content.txt
-        echo "💡 建议：${CATL_ADVICE}" >> /tmp/content.txt
-        echo "" >> /tmp/content.txt
-        echo "━━━━━━━━━━━━━━━━━━━━━" >> /tmp/content.txt
-        echo "" >> /tmp/content.txt
-        echo "🎯 今日策略" >> /tmp/content.txt
-        echo "• 大盘情绪：根据实时数据动态判断" >> /tmp/content.txt
-        echo "• 操作建议：参考个股建议，控制仓位" >> /tmp/content.txt
-        echo "• 重点关注：突破信号和成交量变化" >> /tmp/content.txt
-        echo "" >> /tmp/content.txt
-        echo "⚠️ 风险提示" >> /tmp/content.txt
-        echo "以上分析基于公开数据，仅供参考，不构成投资建议。" >> /tmp/content.txt
-        echo "" >> /tmp/content.txt
-        echo "🐒 不为失败找借口，只为成功找方法！" >> /tmp/content.txt
+        # 构建内容
+        {
+          echo "🐒 猴哥股票专业报告 📊"
+          echo "⏰ ${DATE} ${TIME}"
+          echo ""
+          echo "📈 实时行情"
+          echo ""
+          echo "🚗 比亚迪 002594"
+          echo "💰 现价：¥${BYD_PRICE}"
+          echo "📊 涨跌：${BYD_CHANGE} (${BYD_PCT}%)"
+          echo "💡 ${BYD_ADVICE}"
+          echo ""
+          echo "🍶 贵州茅台 600519"
+          echo "💰 现价：¥${MT_PRICE}"
+          echo "📊 涨跌：${MT_CHANGE} (${MT_PCT}%)"
+          echo "💡 ${MT_ADVICE}"
+          echo ""
+          echo "🔋 宁德时代 300750"
+          echo "💰 现价：¥${CATL_PRICE}"
+          echo "📊 涨跌：${CATL_CHANGE} (${CATL_PCT}%)"
+          echo "💡 ${CATL_ADVICE}"
+          echo ""
+          echo "🎯 今日策略"
+          echo "• 止盈：涨幅超5%考虑减仓"
+          echo "• 止损：跌幅超5%关注风险"
+          echo "• 仓位：控制仓位，灵活应对"
+          echo ""
+          echo "⚠️ 风险提示"
+          echo "以上分析仅供参考，不构成投资建议。"
+          echo ""
+          echo "🐒 不为失败找借口，只为成功找方法！"
+        } > /tmp/content.txt
         
         CONTENT=$(cat /tmp/content.txt)
         
@@ -118,4 +132,4 @@ jobs:
         
         curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
           -H "Content-Type: application/json" \
-          -d "$JSON_PAYLOAD" 2>/dev/null && echo "✅ 推送成功" || echo "❌ 推送失败"
+          -d "$JSON_PAYLOAD" && echo "✅ 推送成功" || echo "❌ 推送失败"
