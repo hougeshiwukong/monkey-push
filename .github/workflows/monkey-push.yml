@@ -101,9 +101,11 @@ jobs:
         MT_ADVICE=$(generate_advice "$MT_PCT")
         CATL_ADVICE=$(generate_advice "$CATL_PCT")
         
-        # 判断是开盘还是收盘
+        # 判断是开盘还是收盘（使用UTC时间判断）
         HOUR=$(TZ=Asia/Shanghai date +%H)
-        if [ "$HOUR" == "09" ] || [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+        # GitHub schedule用UTC时间：1:00=开盘, 7:30=收盘
+        UTC_HOUR=$(date +%H)
+        if [ "$UTC_HOUR" == "01" ] || [ "$HOUR" == "09" ]; then
           TITLE="🐒 猴哥开盘前推荐 - ${DATE}"
           HEADER="📊 大盘研判\n• 市场情绪：根据隔夜美股判断\n• 策略：积极布局，控制仓位"
         else
@@ -148,11 +150,8 @@ ${HEADER}
         
         # 推送到飞书
         echo "正在推送到飞书..."
+        # 使用jq构建JSON避免转义问题
+        echo "$CONTENT" | jq -Rs '{msg_type: "text", content: {text: .}}' > /tmp/payload.json
         curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
           -H "Content-Type: application/json" \
-          -d "{
-            \"msg_type\": \"text\",
-            \"content\": {
-              \"text\": \"${CONTENT}\"
-            }
-          }" && echo "✅ 推送成功" || echo "❌ 推送失败"
+          -d @/tmp/payload.json && echo "✅ 推送成功" || echo "❌ 推送失败"
