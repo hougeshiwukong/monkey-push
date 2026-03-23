@@ -1,4 +1,4 @@
-name: 猴股神自动推送
+name: 猴股神专业推送
 
 on:
   schedule:
@@ -7,24 +7,139 @@ on:
   workflow_dispatch:
 
 jobs:
-  push-morning:
-    if: github.event.schedule == '0 1 * * 1-5' || github.event_name == 'workflow_dispatch'
+  professional-push:
     runs-on: ubuntu-latest
     steps:
-    - name: 开盘前推荐
+    - name: 获取数据并生成专业报告
       run: |
-        DATE=$(date +%Y-%m-%d)
-        curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
-          -H "Content-Type: application/json" \
-          -d "{\"msg_type\": \"text\", \"content\": {\"text\": \"🐒 猴哥开盘前推荐 - ${DATE}\n\n📊 大盘研判\n• 市场情绪：偏乐观\n• 策略：积极布局\n\n🎯 今日关注\n• 比亚迪：关注突破\n• 茅台：长期持有\n• 宁德时代：等待企稳\n\n⚠️ 风险提示\n• 以上仅供参考，不构成投资建议\n\n🐒 不为失败找借口，只为成功找方法！\"}}"
+        DATE=$(TZ=Asia/Shanghai date +%Y-%m-%d)
+        TIME=$(TZ=Asia/Shanghai date +%H:%M)
+        
+        # 获取股票数据（使用腾讯财经API，更稳定）
+        STOCK_DATA=$(curl -s "http://qt.gtimg.cn/q=sz002594,sh600519,sz300750" 2>/dev/null || echo "")
+        
+        # 解析数据函数
+        parse_stock() {
+          DATA=$1
+          CODE=$2
+          if echo "$DATA" | grep -q "$CODE"; then
+            # 腾讯格式: v_sz002594="1~比亚迪~..."
+            LINE=$(echo "$DATA" | grep "$CODE" | head -1)
+            # 提取关键字段
+            NAME=$(echo "$LINE" | cut -d'~' -f2)
+            PRICE=$(echo "$LINE" | cut -d'~' -f3)
+            CHANGE=$(echo "$LINE" | cut -d'~' -f5)
+            CHANGE_PCT=$(echo "$LINE" | cut -d'~' -f6)
+            VOLUME=$(echo "$LINE" | cut -d'~' -f37)
+            HIGH=$(echo "$LINE" | cut -d'~' -f41)
+            LOW=$(echo "$LINE" | cut -d'~' -f43)
+            echo "${NAME}|${PRICE}|${CHANGE}|${CHANGE_PCT}|${VOLUME}|${HIGH}|${LOW}"
+          else
+            echo "获取失败|0|0|0|0|0|0"
+          fi
+        }
+        
+        # 获取三只股票数据
+        BYD=$(parse_stock "$STOCK_DATA" "sz002594")
+        MT=$(parse_stock "$STOCK_DATA" "sh600519")
+        CATL=$(parse_stock "$STOCK_DATA" "sz300750")
+        
+        # 解析
+        BYD_NAME=$(echo "$BYD" | cut -d'|' -f1)
+        BYD_PRICE=$(echo "$BYD" | cut -d'|' -f2)
+        BYD_CHANGE=$(echo "$BYD" | cut -d'|' -f3)
+        BYD_PCT=$(echo "$BYD" | cut -d'|' -f4)
+        
+        MT_NAME=$(echo "$MT" | cut -d'|' -f1)
+        MT_PRICE=$(echo "$MT" | cut -d'|' -f2)
+        MT_CHANGE=$(echo "$MT" | cut -d'|' -f3)
+        MT_PCT=$(echo "$MT" | cut -d'|' -f4)
+        
+        CATL_NAME=$(echo "$CATL" | cut -d'|' -f1)
+        CATL_PRICE=$(echo "$CATL" | cut -d'|' -f2)
+        CATL_CHANGE=$(echo "$CATL" | cut -d'|' -f3)
+        CATL_PCT=$(echo "$CATL" | cut -d'|' -f4)
+        
+        # 生成分析建议
+        generate_advice() {
+          PCT=$1
+          if (( $(echo "$PCT > 3" | bc -l 2>/dev/null || echo 0) )); then
+            echo "🔴 强势上涨，可考虑减仓锁定利润"
+          elif (( $(echo "$PCT > 1" | bc -l 2>/dev/null || echo 0) )); then
+            echo "🟡 温和上涨，持有观望"
+          elif (( $(echo "$PCT > -1" | bc -l 2>/dev/null || echo 0) )); then
+            echo "⚪ 震荡整理，等待方向"
+          elif (( $(echo "$PCT > -3" | bc -l 2>/dev/null || echo 0) )); then
+            echo "🟠 回调中，谨慎观望"
+          else
+            echo "🔵 大幅下跌，关注抄底机会"
+          fi
+        }
+        
+        BYD_ADVICE=$(generate_advice "$BYD_PCT")
+        MT_ADVICE=$(generate_advice "$MT_PCT")
+        CATL_ADVICE=$(generate_advice "$CATL_PCT")
+        
+        # 构建富文本内容
+        CONTENT="🐒 **猴哥股票专业报告** 📊
+⏰ ${DATE} ${TIME}
 
-  push-evening:
-    if: github.event.schedule == '30 7 * * 1-5'
-    runs-on: ubuntu-latest
-    steps:
-    - name: 收盘后复盘
-      run: |
-        DATE=$(date +%Y-%m-%d)
+━━━━━━━━━━━━━━━━━━━━━
+
+📈 **实时行情**
+
+**🚗 比亚迪 002594**
+💰 现价：¥${BYD_PRICE}
+📊 涨跌：${BYD_CHANGE} (${BYD_PCT}%)
+💡 建议：${BYD_ADVICE}
+
+**🍶 贵州茅台 600519**
+💰 现价：¥${MT_PRICE}
+📊 涨跌：${MT_CHANGE} (${MT_PCT}%)
+💡 建议：${MT_ADVICE}
+
+**🔋 宁德时代 300750**
+💰 现价：¥${CATL_PRICE}
+📊 涨跌：${CATL_CHANGE} (${CATL_PCT}%)
+💡 建议：${CATL_ADVICE}
+
+━━━━━━━━━━━━━━━━━━━━━
+
+🎯 **今日策略**
+• 大盘情绪：根据实时数据动态判断
+• 操作建议：参考个股建议，控制仓位
+• 重点关注：突破信号和成交量变化
+
+⚠️ **风险提示**
+以上分析基于公开数据，仅供参考，不构成投资建议。股市有风险，投资需谨慎！
+
+🐒 **不为失败找借口，只为成功找方法！**"
+        
+        # 推送到飞书（使用富文本格式）
         curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
           -H "Content-Type: application/json" \
-          -d "{\"msg_type\": \"text\", \"content\": {\"text\": \"🐒 猴哥收盘复盘 - ${DATE}\n\n📊 今日战况\n• 查看各股表现\n\n💡 复盘总结\n• 分析今日涨跌原因\n\n🎯 明日策略\n• 关注美股走势\n• 控制仓位\n\n🐒 不为失败找借口，只为成功找方法！\"}}"
+          -d "{
+            \"msg_type\": \"post\",
+            \"content\": {
+              \"post\": {
+                \"zh_cn\": {
+                  \"title\": \"🐒 猴哥股票专业报告 - ${DATE}\",
+                  \"content\": [
+                    [
+                      {
+                        \"tag\": \"text\",
+                        \"text\": \"${CONTENT}\"
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          }" 2>/dev/null && echo "✅ 推送成功" || echo "❌ 推送失败，尝试简化格式..."
+        
+        # 如果富文本失败，使用普通文本
+        if [ $? -ne 0 ]; then
+          curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"msg_type\": \"text\", \"content\": {\"text\": \"${CONTENT}\"}}"
+        fi
