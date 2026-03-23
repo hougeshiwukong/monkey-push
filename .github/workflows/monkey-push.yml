@@ -15,7 +15,7 @@ jobs:
         DATE=$(TZ=Asia/Shanghai date +%Y-%m-%d)
         TIME=$(TZ=Asia/Shanghai date +%H:%M)
         
-        # 获取股票数据（使用腾讯财经API，更稳定）
+        # 获取股票数据（使用腾讯财经API）
         STOCK_DATA=$(curl -s "http://qt.gtimg.cn/q=sz002594,sh600519,sz300750" 2>/dev/null || echo "")
         
         # 解析数据函数
@@ -23,19 +23,14 @@ jobs:
           DATA=$1
           CODE=$2
           if echo "$DATA" | grep -q "$CODE"; then
-            # 腾讯格式: v_sz002594="1~比亚迪~..."
             LINE=$(echo "$DATA" | grep "$CODE" | head -1)
-            # 提取关键字段
             NAME=$(echo "$LINE" | cut -d'~' -f2)
             PRICE=$(echo "$LINE" | cut -d'~' -f3)
             CHANGE=$(echo "$LINE" | cut -d'~' -f5)
             CHANGE_PCT=$(echo "$LINE" | cut -d'~' -f6)
-            VOLUME=$(echo "$LINE" | cut -d'~' -f37)
-            HIGH=$(echo "$LINE" | cut -d'~' -f41)
-            LOW=$(echo "$LINE" | cut -d'~' -f43)
-            echo "${NAME}|${PRICE}|${CHANGE}|${CHANGE_PCT}|${VOLUME}|${HIGH}|${LOW}"
+            echo "${NAME}|${PRICE}|${CHANGE}|${CHANGE_PCT}"
           else
-            echo "获取失败|0|0|0|0|0|0"
+            echo "获取失败|0|0|0"
           fi
         }
         
@@ -63,16 +58,17 @@ jobs:
         # 生成分析建议
         generate_advice() {
           PCT=$1
-          if (( $(echo "$PCT > 3" | bc -l 2>/dev/null || echo 0) )); then
-            echo "🔴 强势上涨，可考虑减仓锁定利润"
-          elif (( $(echo "$PCT > 1" | bc -l 2>/dev/null || echo 0) )); then
-            echo "🟡 温和上涨，持有观望"
-          elif (( $(echo "$PCT > -1" | bc -l 2>/dev/null || echo 0) )); then
-            echo "⚪ 震荡整理，等待方向"
-          elif (( $(echo "$PCT > -3" | bc -l 2>/dev/null || echo 0) )); then
-            echo "🟠 回调中，谨慎观望"
+          PCT_INT=${PCT%.*}
+          if [ "$PCT_INT" -gt 3 ] 2>/dev/null; then
+            echo "强势上涨，可考虑减仓锁定利润"
+          elif [ "$PCT_INT" -gt 1 ] 2>/dev/null; then
+            echo "温和上涨，持有观望"
+          elif [ "$PCT_INT" -gt -1 ] 2>/dev/null; then
+            echo "震荡整理，等待方向"
+          elif [ "$PCT_INT" -gt -3 ] 2>/dev/null; then
+            echo "回调中，谨慎观望"
           else
-            echo "🔵 大幅下跌，关注抄底机会"
+            echo "大幅下跌，关注抄底机会"
           fi
         }
         
@@ -80,66 +76,46 @@ jobs:
         MT_ADVICE=$(generate_advice "$MT_PCT")
         CATL_ADVICE=$(generate_advice "$CATL_PCT")
         
-        # 构建富文本内容
-        CONTENT="🐒 **猴哥股票专业报告** 📊
- ${DATE} ${TIME}
-
-━━━━━━━━━━━━━━━━━━━━━
-
-📈 **实时行情**
-
-**🚗 比亚迪 002594**
-💰 现价：¥${BYD_PRICE}
-📊 涨跌：${BYD_CHANGE} (${BYD_PCT}%)
-💡 建议：${BYD_ADVICE}
-
-**🍶 贵州茅台 600519**
-💰 现价：¥${MT_PRICE}
-📊 涨跌：${MT_CHANGE} (${MT_PCT}%)
-💡 建议：${MT_ADVICE}
-
-**🔋 宁德时代 300750**
-💰 现价：¥${CATL_PRICE}
-📊 涨跌：${CATL_CHANGE} (${CATL_PCT}%)
-💡 建议：${CATL_ADVICE}
-
-━━━━━━━━━━━━━━━━━━━━━
-
-🎯 **今日策略**
-• 大盘情绪：根据实时数据动态判断
-• 操作建议：参考个股建议，控制仓位
-• 重点关注：突破信号和成交量变化
-
-⚠️ **风险提示**
-以上分析基于公开数据，仅供参考，不构成投资建议。股市有风险，投资需谨慎！
-
-🐒 **不为失败找借口，只为成功找方法！**"
+        # 使用简单文本格式避免引号问题
+        echo "🐒 猴哥股票专业报告 📊" > /tmp/content.txt
+        echo "⏰ ${DATE} ${TIME}" >> /tmp/content.txt
+        echo "" >> /tmp/content.txt
+        echo "━━━━━━━━━━━━━━━━━━━━━" >> /tmp/content.txt
+        echo "" >> /tmp/content.txt
+        echo "📈 实时行情" >> /tmp/content.txt
+        echo "" >> /tmp/content.txt
+        echo "🚗 比亚迪 002594" >> /tmp/content.txt
+        echo "💰 现价：¥${BYD_PRICE}" >> /tmp/content.txt
+        echo "📊 涨跌：${BYD_CHANGE} (${BYD_PCT}%)" >> /tmp/content.txt
+        echo "💡 建议：${BYD_ADVICE}" >> /tmp/content.txt
+        echo "" >> /tmp/content.txt
+        echo "🍶 贵州茅台 600519" >> /tmp/content.txt
+        echo "💰 现价：¥${MT_PRICE}" >> /tmp/content.txt
+        echo "📊 涨跌：${MT_CHANGE} (${MT_PCT}%)" >> /tmp/content.txt
+        echo "💡 建议：${MT_ADVICE}" >> /tmp/content.txt
+        echo "" >> /tmp/content.txt
+        echo "🔋 宁德时代 300750" >> /tmp/content.txt
+        echo "💰 现价：¥${CATL_PRICE}" >> /tmp/content.txt
+        echo "📊 涨跌：${CATL_CHANGE} (${CATL_PCT}%)" >> /tmp/content.txt
+        echo "💡 建议：${CATL_ADVICE}" >> /tmp/content.txt
+        echo "" >> /tmp/content.txt
+        echo "━━━━━━━━━━━━━━━━━━━━━" >> /tmp/content.txt
+        echo "" >> /tmp/content.txt
+        echo "🎯 今日策略" >> /tmp/content.txt
+        echo "• 大盘情绪：根据实时数据动态判断" >> /tmp/content.txt
+        echo "• 操作建议：参考个股建议，控制仓位" >> /tmp/content.txt
+        echo "• 重点关注：突破信号和成交量变化" >> /tmp/content.txt
+        echo "" >> /tmp/content.txt
+        echo "⚠️ 风险提示" >> /tmp/content.txt
+        echo "以上分析基于公开数据，仅供参考，不构成投资建议。" >> /tmp/content.txt
+        echo "" >> /tmp/content.txt
+        echo "🐒 不为失败找借口，只为成功找方法！" >> /tmp/content.txt
         
-        # 推送到飞书（使用富文本格式）
+        CONTENT=$(cat /tmp/content.txt)
+        
+        # 推送到飞书
+        JSON_PAYLOAD=$(jq -n --arg text "$CONTENT" '{msg_type: "text", content: {text: $text}}')
+        
         curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
           -H "Content-Type: application/json" \
-          -d "{
-            \"msg_type\": \"post\",
-            \"content\": {
-              \"post\": {
-                \"zh_cn\": {
-                  \"title\": \"🐒 猴哥股票专业报告 - ${DATE}\",
-                  \"content\": [
-                    [
-                      {
-                        \"tag\": \"text\",
-                        \"text\": \"${CONTENT}\"
-                      }
-                    ]
-                  ]
-                }
-              }
-            }
-          }" 2>/dev/null && echo "✅ 推送成功" || echo "❌ 推送失败，尝试简化格式..."
-        
-        # 如果富文本失败，使用普通文本
-        if [ $? -ne 0 ]; then
-          curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"msg_type\": \"text\", \"content\": {\"text\": \"${CONTENT}\"}}"
-        fi
+          -d "$JSON_PAYLOAD" 2>/dev/null && echo "✅ 推送成功" || echo "❌ 推送失败"
