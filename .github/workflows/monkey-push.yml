@@ -15,76 +15,78 @@ jobs:
         DATE=$(TZ=Asia/Shanghai date +%Y-%m-%d)
         TIME=$(TZ=Asia/Shanghai date +%H:%M)
         
-        # 使用东方财富API获取数据
-        get_eastmoney_data() {
-          CODE=$1
-          PREFIX=$2
-          RESPONSE=$(curl -s "https://push2.eastmoney.com/api/qt/stock/get?secid=${PREFIX}.${CODE}&fields=f43,f57,f58,f60,f170" 2>/dev/null)
-          echo "$RESPONSE"
-        }
+        # 尝试获取股票数据
+        BYD_PRICE="获取中"
+        BYD_CHANGE="0"
+        BYD_PCT="0"
         
-        # 获取三只股票数据
-        BYD_RAW=$(get_eastmoney_data "002594" "0")
-        MT_RAW=$(get_eastmoney_data "600519" "1")
-        CATL_RAW=$(get_eastmoney_data "300750" "0")
+        MT_PRICE="获取中"
+        MT_CHANGE="0"
+        MT_PCT="0"
         
-        # 解析函数
-        parse_data() {
-          RAW=$1
-          PRICE=$(echo "$RAW" | grep -o '"f43":[0-9]*' | cut -d':' -f2)
-          NAME=$(echo "$RAW" | grep -o '"f58":"[^"]*"' | cut -d'"' -f4)
-          PREV=$(echo "$RAW" | grep -o '"f60":[0-9]*' | cut -d':' -f2)
-          CHANGE=$(echo "$RAW" | grep -o '"f170":-[0-9]*\|"f170":[0-9]*' | cut -d':' -f2)
+        CATL_PRICE="获取中"
+        CATL_CHANGE="0"
+        CATL_PCT="0"
+        
+        # 尝试从API获取
+        RESPONSE=$(curl -s --max-time 5 "https://push2.eastmoney.com/api/qt/stock/get?secid=0.002594&fields=f43,f170,f60" 2>/dev/null || echo "")
+        if [ -n "$RESPONSE" ]; then
+          # 提取价格
+          F43=$(echo "$RESPONSE" | grep -oP '"f43":\K[0-9]+' || echo "0")
+          F170=$(echo "$RESPONSE" | grep -oP '"f170":\K-?[0-9]+' || echo "0")
+          F60=$(echo "$RESPONSE" | grep -oP '"f60":\K[0-9]+' || echo "1")
           
-          # 计算
-          if [ -n "$PRICE" ] && [ -n "$PREV" ] && [ "$PREV" -ne 0 ]; then
-            PRICE_DEC=$(echo "scale=2; $PRICE / 100" | bc)
-            CHANGE_DEC=$(echo "scale=2; $CHANGE / 100" | bc)
-            PCT=$(echo "scale=2; ($CHANGE / $PREV) * 100" | bc)
-            echo "${NAME}|${PRICE_DEC}|${CHANGE_DEC}|${PCT}"
-          else
-            echo "获取失败|0|0|0"
+          if [ "$F43" != "0" ] && [ "$F60" != "0" ]; then
+            BYD_PRICE=$(awk "BEGIN {printf \"%.2f\", $F43/100}")
+            BYD_CHANGE=$(awk "BEGIN {printf \"%.2f\", $F170/100}")
+            BYD_PCT=$(awk "BEGIN {printf \"%.2f\", ($F170/$F60)*100}")
           fi
-        }
+        fi
         
-        BYD=$(parse_data "$BYD_RAW")
-        MT=$(parse_data "$MT_RAW")
-        CATL=$(parse_data "$CATL_RAW")
+        # 茅台
+        RESPONSE=$(curl -s --max-time 5 "https://push2.eastmoney.com/api/qt/stock/get?secid=1.600519&fields=f43,f170,f60" 2>/dev/null || echo "")
+        if [ -n "$RESPONSE" ]; then
+          F43=$(echo "$RESPONSE" | grep -oP '"f43":\K[0-9]+' || echo "0")
+          F170=$(echo "$RESPONSE" | grep -oP '"f170":\K-?[0-9]+' || echo "0")
+          F60=$(echo "$RESPONSE" | grep -oP '"f60":\K[0-9]+' || echo "1")
+          
+          if [ "$F43" != "0" ] && [ "$F60" != "0" ]; then
+            MT_PRICE=$(awk "BEGIN {printf \"%.2f\", $F43/100}")
+            MT_CHANGE=$(awk "BEGIN {printf \"%.2f\", $F170/100}")
+            MT_PCT=$(awk "BEGIN {printf \"%.2f\", ($F170/$F60)*100}")
+          fi
+        fi
         
-        # 解析
-        BYD_NAME=$(echo "$BYD" | cut -d'|' -f1)
-        BYD_PRICE=$(echo "$BYD" | cut -d'|' -f2)
-        BYD_CHANGE=$(echo "$BYD" | cut -d'|' -f3)
-        BYD_PCT=$(echo "$BYD" | cut -d'|' -f4)
+        # 宁德时代
+        RESPONSE=$(curl -s --max-time 5 "https://push2.eastmoney.com/api/qt/stock/get?secid=0.300750&fields=f43,f170,f60" 2>/dev/null || echo "")
+        if [ -n "$RESPONSE" ]; then
+          F43=$(echo "$RESPONSE" | grep -oP '"f43":\K[0-9]+' || echo "0")
+          F170=$(echo "$RESPONSE" | grep -oP '"f170":\K-?[0-9]+' || echo "0")
+          F60=$(echo "$RESPONSE" | grep -oP '"f60":\K[0-9]+' || echo "1")
+          
+          if [ "$F43" != "0" ] && [ "$F60" != "0" ]; then
+            CATL_PRICE=$(awk "BEGIN {printf \"%.2f\", $F43/100}")
+            CATL_CHANGE=$(awk "BEGIN {printf \"%.2f\", $F170/100}")
+            CATL_PCT=$(awk "BEGIN {printf \"%.2f\", ($F170/$F60)*100}")
+          fi
+        fi
         
-        MT_NAME=$(echo "$MT" | cut -d'|' -f1)
-        MT_PRICE=$(echo "$MT" | cut -d'|' -f2)
-        MT_CHANGE=$(echo "$MT" | cut -d'|' -f3)
-        MT_PCT=$(echo "$MT" | cut -d'|' -f4)
-        
-        CATL_NAME=$(echo "$CATL" | cut -d'|' -f1)
-        CATL_PRICE=$(echo "$CATL" | cut -d'|' -f2)
-        CATL_CHANGE=$(echo "$CATL" | cut -d'|' -f3)
-        CATL_PCT=$(echo "$CATL" | cut -d'|' -f4)
-        
-        # 生成建议（含止损止盈）
+        # 生成建议
         generate_advice() {
           PCT=$1
-          PCT_INT=${PCT%.*}
-          if [ -z "$PCT_INT" ]; then
-            PCT_INT=0
-          fi
+          PCT_NUM=$(echo "$PCT" | cut -d'.' -f1)
+          PCT_NUM=${PCT_NUM:-0}
           
-          if [ "$PCT_INT" -gt 5 ]; then
-            echo "🔴 止盈建议：涨幅超5%，可考虑减仓锁定利润"
-          elif [ "$PCT_INT" -gt 2 ]; then
-            echo "🟡 持有观望：温和上涨，继续观察"
-          elif [ "$PCT_INT" -gt -2 ]; then
-            echo "⚪ 震荡整理：等待明确方向"
-          elif [ "$PCT_INT" -gt -5 ]; then
-            echo "🟠 止损关注：回调中，设好止损位"
+          if [ "$PCT_NUM" -gt 5 ] 2>/dev/null; then
+            echo "止盈建议：涨幅超5%，考虑减仓"
+          elif [ "$PCT_NUM" -gt 2 ] 2>/dev/null; then
+            echo "持有观望：温和上涨"
+          elif [ "$PCT_NUM" -gt -2 ] 2>/dev/null; then
+            echo "震荡整理：等待方向"
+          elif [ "$PCT_NUM" -gt -5 ] 2>/dev/null; then
+            echo "止损关注：回调中，设好止损"
           else
-            echo "🔵 抄底机会：跌幅超5%，关注反弹机会"
+            echo "抄底机会：跌幅超5%，关注反弹"
           fi
         }
         
@@ -128,8 +130,8 @@ jobs:
         CONTENT=$(cat /tmp/content.txt)
         
         # 推送到飞书
-        JSON_PAYLOAD=$(jq -n --arg text "$CONTENT" '{msg_type: "text", content: {text: $text}}')
+        jq -n --arg text "$CONTENT" '{msg_type: "text", content: {text: $text}}' > /tmp/payload.json
         
         curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
           -H "Content-Type: application/json" \
-          -d "$JSON_PAYLOAD" && echo "✅ 推送成功" || echo "❌ 推送失败"
+          -d @/tmp/payload.json && echo "✅ 推送成功" || echo "❌ 推送失败"
